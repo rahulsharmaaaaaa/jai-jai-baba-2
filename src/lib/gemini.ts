@@ -80,7 +80,7 @@ VERIFICATION CRITERIA (all must be met for 95+):
 8. NO plain text tables with || or similar - ONLY KaTeX arrays
 
 SCORING GUIDE:
-- 95-100: PERFECT extraction, indistinguishable from original
+- 99-100: PERFECT extraction, indistinguishable from original
 - 85-94: Minor formatting issues (small KaTeX errors, slightly inaccurate SVG)
 - 75-84: Missing elements or noticeable errors (incomplete options, wrong math)
 - Below 75: Major problems (missing questions, wrong content, plain text tables)
