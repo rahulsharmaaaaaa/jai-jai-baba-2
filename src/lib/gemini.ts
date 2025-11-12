@@ -85,12 +85,12 @@ SCORING GUIDE:
 - 75-84: Missing elements or noticeable errors (incomplete options, wrong math)
 - Below 75: Major problems (missing questions, wrong content, plain text tables)
 
-CRITICAL: Be strict. If you see plain text tables (||) instead of KaTeX arrays, score below 95.
+CRITICAL: Be strict. If you see plain text tables (||) instead of KaTeX arrays, score below 99.
 
 Return ONLY this JSON format (no explanation):
-{"score": 95, "feedback": "Tables should use KaTeX array format instead of plain text"}
+{"score": 99, "feedback": "Tables should use KaTeX array format instead of plain text"}
 
-The feedback should be specific about what needs fixing to reach 95+ score.`
+The feedback should be specific about what needs fixing to reach 99+ score.`
 
       const result = await model.generateContent([
         verificationPrompt,
