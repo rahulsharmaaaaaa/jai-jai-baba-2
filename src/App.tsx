@@ -178,31 +178,42 @@ export default function App() {
           let pageQuestions: ExtractedQuestion[] = []
           let verificationScore = 0
           let extractionResponse = ''
+          let feedback = ''
           const maxAttempts = 6
 
           for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-              extractionResponse = await gemini.analyzeImage(imageData, prompt)
+              if (attempt === 1) {
+                extractionResponse = await gemini.analyzeImage(imageData, prompt)
+              } else {
+                console.log(`Page ${i + 1}, attempt ${attempt}: Fixing based on feedback: ${feedback}`)
+                extractionResponse = await gemini.fixExtraction(imageData, extractionResponse, feedback)
+              }
+
               const questions = parseGeminiResponse(extractionResponse, pdfFile.year)
 
               if (questions.length === 0) {
                 console.log(`Page ${i + 1}: No questions found, attempt ${attempt}/${maxAttempts}`)
                 if (attempt < maxAttempts) {
+                  feedback = 'No questions were extracted. Please scan the image again and extract all complete questions.'
                   await new Promise(resolve => setTimeout(resolve, 1000))
                   continue
                 }
                 break
               }
 
-              verificationScore = await gemini.verifyExtraction(imageData, extractionResponse)
-              console.log(`Page ${i + 1}, attempt ${attempt}: Verification score ${verificationScore}%`)
+              const verification = await gemini.verifyExtraction(imageData, extractionResponse)
+              verificationScore = verification.score
+              feedback = verification.feedback
+
+              console.log(`Page ${i + 1}, attempt ${attempt}: Score ${verificationScore}% - ${feedback}`)
 
               if (verificationScore >= 95) {
                 pageQuestions = questions
                 console.log(`Page ${i + 1}: Approved with score ${verificationScore}%`)
                 break
               } else if (attempt < maxAttempts) {
-                console.log(`Page ${i + 1}: Score too low (${verificationScore}%), retrying...`)
+                console.log(`Page ${i + 1}: Score too low (${verificationScore}%), fixing issues...`)
                 await new Promise(resolve => setTimeout(resolve, 1500))
               } else {
                 console.log(`Page ${i + 1}: Max attempts reached, using best extraction (score: ${verificationScore}%)`)
@@ -213,6 +224,7 @@ export default function App() {
               if (attempt === maxAttempts) {
                 throw error
               }
+              feedback = 'Previous attempt failed with error. Please try again.'
               await new Promise(resolve => setTimeout(resolve, 2000))
             }
           }
@@ -265,7 +277,7 @@ export default function App() {
 
 IMPORTANT RULES:
 1. Extract ONLY COMPLETE questions (ignore partial/continued questions)
-2. You MUST use KaTeX for ALL mathematical content
+2. You MUST use KaTeX for ALL mathematical content, tables, and matrices
 3. You MUST create SVG for ALL visual elements (diagrams, circuits, graphs, etc.)
 4. Extraction must be 100% accurate - students should not notice any difference
 
@@ -277,15 +289,27 @@ Question types to extract: ${enabledTypes}
 
 FORMATTING REQUIREMENTS:
 
-KaTeX (MANDATORY for ALL math):
-- Inline: $x^2 + y^2 = z^2$
-- Display: $$\\int_0^1 f(x)dx$$
+KaTeX (MANDATORY for ALL math, tables, matrices):
+- Inline math: $x^2 + y^2 = z^2$
+- Display math: $$\\int_0^1 f(x)dx$$
 - Fractions: $\\frac{a}{b}$
 - Matrices: $$\\begin{bmatrix}1 & 2\\\\3 & 4\\end{bmatrix}$$
-- Tables: $$\\begin{array}{|c|l|}\\hline \\textbf{Col-I} & \\textbf{Col-II}\\\\\\hline P. & \\text{Text}\\\\\\hline\\end{array}$$
-- Bold: \\mathbf{P}, \\mathbf{Q}
-- Greek: \\alpha, \\beta, \\gamma
+- Bold variables: \\mathbf{P}, \\mathbf{Q}
+- Greek letters: \\alpha, \\beta, \\gamma
 - Symbols: \\sum, \\prod, \\int, \\infty
+
+TABLES (CRITICAL - NEVER use plain text tables):
+WRONG: Column-I | Column-II or using || symbols
+RIGHT: $$\\begin{array}{|c|l|c|l|}\\hline\\textbf{Column-I} & & \\textbf{Column-II} & \\\\\\hline P. & \\text{This house is in a mess.} & 1. & \\text{Alright, I won't bring it up.}\\\\\\hline Q. & \\text{I am not happy with the marks.} & 2. & \\text{Well, you can look it up.}\\\\\\hline\\end{array}$$
+
+KEY TABLE RULES:
+- Use $$\\begin{array}{|c|l|c|l|}...\\end{array}$$ for ALL tables
+- Use \\hline for horizontal lines
+- Use & to separate columns
+- Use \\\\ to end rows
+- Use \\text{} for non-math text in tables
+- Use \\textbf{} for bold headers
+- Column alignment: |c| = centered, |l| = left, |r| = right
 
 SVG (MANDATORY for ALL diagrams):
 - Venn diagrams, circuits, graphs, geometric figures
@@ -293,11 +317,14 @@ SVG (MANDATORY for ALL diagrams):
 - Label all elements accurately
 - Match original exactly
 
-EXAMPLE (with SVG):
-"In the given figure, numbers 1, 2, and 3 are associated with rectangle, triangle, and circle. Find the correct combination of \\mathbf{P}, \\mathbf{Q}, and \\mathbf{R}.\n\n<svg width=\"600\" height=\"400\" viewBox=\"0 0 600 400\" xmlns=\"http://www.w3.org/2000/svg\"><style>.set{fill:none;stroke:black;stroke-width:2;}.label{font-size:20px;}</style><rect x=\"50\" y=\"100\" width=\"300\" height=\"200\" class=\"set\"/><polygon points=\"350,50 550,320 150,320\" class=\"set\"/><circle cx=\"400\" cy=\"220\" r=\"120\" class=\"set\"/><text x=\"100\" y=\"200\" class=\"label\">1</text><text x=\"450\" y=\"100\" class=\"label\">2</text><text x=\"350\" y=\"350\" class=\"label\">3</text></svg>"
+EXAMPLE (Table with KaTeX):
+question_statement: "Column-I has statements; Column-II has responses.\n\n$$\\begin{array}{|c|l|c|l|}\\hline\\textbf{Column-I} & & \\textbf{Column-II} & \\\\\\hline P. & \\text{This house is in a mess.} & 1. & \\text{Alright, I won't bring it up.}\\\\\\hline Q. & \\text{Not happy with marks.} & 2. & \\text{You can look it up.}\\\\\\hline\\end{array}$$\n\nIdentify the correct match."
+
+EXAMPLE (Diagram with SVG):
+question_statement: "In the given figure, numbers 1, 2, and 3 are associated with rectangle, triangle, and circle. Find \\mathbf{P}, \\mathbf{Q}, \\mathbf{R}.\n\n<svg width=\"600\" height=\"400\" viewBox=\"0 0 600 400\" xmlns=\"http://www.w3.org/2000/svg\"><style>.set{fill:none;stroke:black;stroke-width:2;}.label{font-size:20px;}</style><rect x=\"50\" y=\"100\" width=\"300\" height=\"200\" class=\"set\"/><polygon points=\"350,50 550,320 150,320\" class=\"set\"/><circle cx=\"400\" cy=\"220\" r=\"120\" class=\"set\"/><text x=\"100\" y=\"200\" class=\"label\">1</text></svg>"
 
 OPTIONS (MCQ/MSQ):
-- Use KaTeX for math: ["$P = 6$; $Q = 5$", "$P = 5$; $Q = 6$"]
+- Use KaTeX for math: ["$P = 6$; $Q = 5$; $R = 3$", "$P = 5$; $Q = 6$; $R = 3$"]
 - Ensure ALL options are visible
 
 VALIDATION:
@@ -305,7 +332,9 @@ VALIDATION:
 - ALL options visible (MCQ/MSQ)
 - No "continued..." text
 - All math in KaTeX
+- All tables in KaTeX array format
 - All diagrams in SVG
+- NO plain text tables with || symbols
 
 Return ONLY valid JSON (no markdown):
 [{"question_type":"MCQ","question_statement":"What is $x^2$ if $x=2$?","options":["$2$","$4$","$8$","$16$"]}]
