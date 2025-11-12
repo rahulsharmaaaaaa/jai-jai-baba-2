@@ -25,7 +25,7 @@ export class GeminiRoundRobin {
     for (let i = 0; i < retries && i < this.clients.length; i++) {
       try {
         const client = this.getNextClient()
-        const model = client.getGenerativeModel({ model: 'gemini-2.0-flash' })
+        const model = client.getGenerativeModel({ model: 'gemini-2.5-flash' })
 
         const result = await model.generateContent([
           prompt,
