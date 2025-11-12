@@ -605,7 +605,7 @@ Empty if no complete questions: []`
                   fontSize: '14px'
                 }}
               >
-                <option value="">GATE</option>
+                <option value="">Select exam</option>
                 {exams.map(exam => (
                   <option key={exam.id} value={exam.id}>{exam.name}</option>
                 ))}
@@ -628,7 +628,7 @@ Empty if no complete questions: []`
                 }}
                 disabled={!selectedExam}
               >
-                <option value="">Data Science (DA)</option>
+                <option value="">Select course</option>
                 {courses.map(course => (
                   <option key={course.id} value={course.id}>{course.name}</option>
                 ))}
