@@ -140,7 +140,7 @@ The feedback should be specific about what needs fixing to reach 99+ score.`
   async countQuestionsInImage(imageData: string): Promise<number> {
     try {
       const client = this.getNextClient()
-      const model = client.getGenerativeModel({ model: 'gemini-2.0-flash' })
+      const model = client.getGenerativeModel({ model: 'gemini-2.5-flash' })
 
       const countPrompt = `Count the TOTAL number of complete questions on this page.
 
