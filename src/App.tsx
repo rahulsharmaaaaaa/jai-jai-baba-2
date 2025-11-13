@@ -175,6 +175,16 @@ export default function App() {
           const imageData = images[i]
           const prompt = generatePrompt()
 
+          console.log(`\n=== PROCESSING PAGE ${i + 1} ===`)
+
+          let expectedQuestionCount = 0
+          try {
+            expectedQuestionCount = await gemini.countQuestionsInImage(imageData)
+            console.log(`Page ${i + 1}: Expected ${expectedQuestionCount} questions`)
+          } catch (error) {
+            console.error(`Failed to count questions on page ${i + 1}:`, error)
+          }
+
           let pageQuestions: ExtractedQuestion[] = []
           let verificationScore = 0
           let extractionResponse = ''
@@ -184,18 +194,20 @@ export default function App() {
           for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
               if (attempt === 1) {
+                console.log(`Page ${i + 1}, Attempt ${attempt}: Initial extraction...`)
                 extractionResponse = await gemini.analyzeImage(imageData, prompt)
               } else {
-                console.log(`Page ${i + 1}, attempt ${attempt}: Fixing based on feedback: ${feedback}`)
+                console.log(`Page ${i + 1}, Attempt ${attempt}: Fixing - ${feedback}`)
                 extractionResponse = await gemini.fixExtraction(imageData, extractionResponse, feedback)
               }
 
               const questions = parseGeminiResponse(extractionResponse, pdfFile.year)
+              console.log(`Page ${i + 1}, Attempt ${attempt}: Extracted ${questions.length} questions`)
 
               if (questions.length === 0) {
-                console.log(`Page ${i + 1}: No questions found, attempt ${attempt}/${maxAttempts}`)
+                console.log(`Page ${i + 1}: No questions extracted, attempt ${attempt}/${maxAttempts}`)
                 if (attempt < maxAttempts) {
-                  feedback = 'No questions were extracted. Please scan the image again and extract all complete questions.'
+                  feedback = 'No questions extracted. Scan image again and extract ALL complete questions visible on the page.'
                   await new Promise(resolve => setTimeout(resolve, 1000))
                   continue
                 }
@@ -206,28 +218,41 @@ export default function App() {
               verificationScore = verification.score
               feedback = verification.feedback
 
-              console.log(`Page ${i + 1}, attempt ${attempt}: Score ${verificationScore}% - ${feedback}`)
+              console.log(`Page ${i + 1}, Attempt ${attempt}: Verification score ${verificationScore}% - ${feedback}`)
 
-              if (verificationScore >= 95) {
+              const questionMismatch = expectedQuestionCount > 0 && questions.length < expectedQuestionCount
+              if (questionMismatch) {
+                feedback += ` (CRITICAL: Expected ${expectedQuestionCount} questions but only extracted ${questions.length}. Make sure no questions are skipped.)`
+                verificationScore = Math.max(0, verificationScore - 20)
+                console.log(`Page ${i + 1}: Question count mismatch! Expected ${expectedQuestionCount}, got ${questions.length}`)
+              }
+
+              if (verificationScore >= 99) {
                 pageQuestions = questions
-                console.log(`Page ${i + 1}: Approved with score ${verificationScore}%`)
+                console.log(`Page ${i + 1}: APPROVED! Score ${verificationScore}% - All ${questions.length} questions extracted perfectly`)
+                break
+              } else if (verificationScore >= 95 && !questionMismatch) {
+                pageQuestions = questions
+                console.log(`Page ${i + 1}: Accepted with score ${verificationScore}% (good enough)`)
                 break
               } else if (attempt < maxAttempts) {
-                console.log(`Page ${i + 1}: Score too low (${verificationScore}%), fixing issues...`)
+                console.log(`Page ${i + 1}: Score too low (${verificationScore}%), retrying...`)
                 await new Promise(resolve => setTimeout(resolve, 1500))
               } else {
                 console.log(`Page ${i + 1}: Max attempts reached, using best extraction (score: ${verificationScore}%)`)
                 pageQuestions = questions
               }
             } catch (error) {
-              console.error(`Page ${i + 1}, attempt ${attempt} failed:`, error)
+              console.error(`Page ${i + 1}, Attempt ${attempt} failed:`, error)
               if (attempt === maxAttempts) {
                 throw error
               }
-              feedback = 'Previous attempt failed with error. Please try again.'
+              feedback = 'Previous attempt failed. Retrying with next API key...'
               await new Promise(resolve => setTimeout(resolve, 2000))
             }
           }
+
+          console.log(`Page ${i + 1}: Final result - ${pageQuestions.length} questions extracted`)
 
           for (const question of pageQuestions) {
             setExtractedQuestions(prev => [...prev, question])
@@ -238,6 +263,14 @@ export default function App() {
               } catch (saveError) {
                 console.error('Error auto-saving question:', saveError)
               }
+            }
+          }
+
+          if (pageQuestions.length > 0 && expectedQuestionCount > 0) {
+            if (pageQuestions.length === expectedQuestionCount) {
+              console.log(`Page ${i + 1}: COMPLETE VALIDATION PASSED - All ${pageQuestions.length} questions extracted`)
+            } else {
+              console.warn(`Page ${i + 1}: WARNING - Expected ${expectedQuestionCount} questions but extracted ${pageQuestions.length}`)
             }
           }
 

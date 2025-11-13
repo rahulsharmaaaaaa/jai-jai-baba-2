@@ -137,10 +137,57 @@ The feedback should be specific about what needs fixing to reach 99+ score.`
     }
   }
 
-  async fixExtraction(imageData: string, previousCode: string, feedback: string): Promise<string> {
+  async countQuestionsInImage(imageData: string): Promise<number> {
     try {
       const client = this.getNextClient()
       const model = client.getGenerativeModel({ model: 'gemini-2.0-flash' })
+
+      const countPrompt = `Count the TOTAL number of complete questions on this page.
+
+Include all question types: MCQ, MSQ, NAT, subjective, matching, assertion-reason, etc.
+
+IMPORTANT:
+- Count ONLY complete questions (not partial/continued from previous page)
+- Do NOT count headers, instructions, or non-question text
+- If a question spans multiple parts, count it as ONE question
+
+Return ONLY a JSON number (no explanation):
+{"count": 5}`
+
+      const result = await model.generateContent([
+        countPrompt,
+        {
+          inlineData: {
+            data: imageData,
+            mimeType: 'image/png'
+          }
+        }
+      ])
+
+      const response = await result.response
+      const text = response.text().trim()
+
+      console.log('Question count response:', text)
+
+      const match = text.match(/"count"\s*:\s*(\d+)/)
+      if (match) {
+        const count = parseInt(match[1])
+        console.log('Total questions on page:', count)
+        return count
+      }
+
+      console.log('Could not parse question count')
+      return 0
+    } catch (error) {
+      console.error('Question count failed:', error)
+      return 0
+    }
+  }
+
+  async fixExtraction(imageData: string, previousCode: string, feedback: string): Promise<string> {
+    try {
+      const client = this.getNextClient()
+      const model = client.getGenerativeModel({ model: 'gemini-2.5-flash' })
 
       const fixPrompt = `You previously extracted questions from an image, but the extraction needs improvement.
 
