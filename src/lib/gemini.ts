@@ -61,7 +61,7 @@ export class GeminiRoundRobin {
   async verifyExtraction(imageData: string, extractedCode: string): Promise<{ score: number, feedback: string }> {
     try {
       const client = this.getNextClient()
-      const model = client.getGenerativeModel({ model: 'gemini-2.0-flash' })
+      const model = client.getGenerativeModel({ model: 'gemini-2.5-flash' })
 
       const verificationPrompt = `You are an expert verifier checking if question extraction is PERFECT.
 
