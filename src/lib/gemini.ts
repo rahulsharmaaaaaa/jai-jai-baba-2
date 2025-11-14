@@ -1,5 +1,32 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
+async function waitForNetwork(maxWaitSeconds: number = 300): Promise<void> {
+  const startTime = Date.now()
+  const maxWaitMs = maxWaitSeconds * 1000
+
+  while (Date.now() - startTime < maxWaitMs) {
+    if (navigator.onLine) {
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      return
+    }
+    console.log('Network offline, waiting for connection...')
+    await new Promise(resolve => setTimeout(resolve, 2000))
+  }
+
+  throw new Error('Network connection timeout after ' + maxWaitSeconds + ' seconds')
+}
+
+function isNetworkError(error: any): boolean {
+  const errorMessage = error?.message?.toLowerCase() || ''
+  return (
+    errorMessage.includes('fetch') ||
+    errorMessage.includes('network') ||
+    errorMessage.includes('failed to fetch') ||
+    errorMessage.includes('load failed') ||
+    !navigator.onLine
+  )
+}
+
 export class GeminiRoundRobin {
   private apiKeys: string[]
   private currentIndex: number = 0
@@ -24,6 +51,8 @@ export class GeminiRoundRobin {
 
     for (let i = 0; i < retries && i < this.clients.length; i++) {
       try {
+        await waitForNetwork()
+
         const client = this.getNextClient()
         const model = client.getGenerativeModel({ model: 'gemini-2.5-flash' })
 
@@ -49,6 +78,13 @@ export class GeminiRoundRobin {
         lastError = error as Error
         console.error(`API key ${i + 1} failed:`, error)
 
+        if (isNetworkError(error)) {
+          console.log('Network error detected, waiting for connection...')
+          await waitForNetwork()
+          i--
+          continue
+        }
+
         if (i < retries - 1) {
           await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000))
         }
@@ -60,6 +96,8 @@ export class GeminiRoundRobin {
 
   async verifyExtraction(imageData: string, extractedCode: string): Promise<{ score: number, feedback: string }> {
     try {
+      await waitForNetwork()
+
       const client = this.getNextClient()
       const model = client.getGenerativeModel({ model: 'gemini-2.5-flash' })
 
@@ -133,12 +171,21 @@ The feedback should be specific about what needs fixing to reach 99+ score.`
       return { score: 0, feedback: 'Verification failed' }
     } catch (error) {
       console.error('Verification failed:', error)
+
+      if (isNetworkError(error)) {
+        console.log('Network error in verification, waiting...')
+        await waitForNetwork()
+        return this.verifyExtraction(imageData, extractedCode)
+      }
+
       return { score: 0, feedback: 'Verification error' }
     }
   }
 
   async countQuestionsInImage(imageData: string): Promise<number> {
     try {
+      await waitForNetwork()
+
       const client = this.getNextClient()
       const model = client.getGenerativeModel({ model: 'gemini-2.5-flash' })
 
@@ -180,12 +227,21 @@ Return ONLY a JSON number (no explanation):
       return 0
     } catch (error) {
       console.error('Question count failed:', error)
+
+      if (isNetworkError(error)) {
+        console.log('Network error in count, waiting...')
+        await waitForNetwork()
+        return this.countQuestionsInImage(imageData)
+      }
+
       return 0
     }
   }
 
   async fixExtraction(imageData: string, previousCode: string, feedback: string): Promise<string> {
     try {
+      await waitForNetwork()
+
       const client = this.getNextClient()
       const model = client.getGenerativeModel({ model: 'gemini-2.5-flash' })
 
@@ -242,6 +298,13 @@ Return ONLY valid JSON (no markdown):
       return text
     } catch (error) {
       console.error('Fix extraction failed:', error)
+
+      if (isNetworkError(error)) {
+        console.log('Network error in fix, waiting...')
+        await waitForNetwork()
+        return this.fixExtraction(imageData, previousCode, feedback)
+      }
+
       throw error
     }
   }
