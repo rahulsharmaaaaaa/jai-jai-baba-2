@@ -273,6 +273,10 @@ CRITICAL FORMATTING RULES:
 5. OPTIONS:
    Use KaTeX for math in options: ["$P = 6$; $Q = 5$; $R = 3$"]
 
+6. Don'ts" 
+    use blanks like _______ not like \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_ 
+    when you use \anything then after anything give space and then write like "\nThe" is wrong and "\n The" is correct
+
 Fix ONLY the issues mentioned in the feedback. Return the COMPLETE corrected JSON with ALL questions.
 
 Return ONLY valid JSON (no markdown):
