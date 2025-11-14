@@ -171,6 +171,8 @@ export default function App() {
           prev.map(p => p.id === pdfFile.id ? { ...p, totalPages: images.length } : p)
         )
 
+        const skippedPages: number[] = []
+
         for (let i = 0; i < images.length; i++) {
           const imageData = images[i]
           const prompt = generatePrompt()
@@ -190,6 +192,7 @@ export default function App() {
           let extractionResponse = ''
           let feedback = ''
           const maxAttempts = 6
+          let pageProcessed = false
 
           for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
@@ -211,6 +214,8 @@ export default function App() {
                   await new Promise(resolve => setTimeout(resolve, 1000))
                   continue
                 }
+                skippedPages.push(i + 1)
+                console.warn(`Page ${i + 1}: SKIPPED - No questions found after ${maxAttempts} attempts`)
                 break
               }
 
@@ -229,10 +234,12 @@ export default function App() {
 
               if (verificationScore >= 99) {
                 pageQuestions = questions
+                pageProcessed = true
                 console.log(`Page ${i + 1}: APPROVED! Score ${verificationScore}% - All ${questions.length} questions extracted perfectly`)
                 break
               } else if (verificationScore >= 95 && !questionMismatch) {
                 pageQuestions = questions
+                pageProcessed = true
                 console.log(`Page ${i + 1}: Accepted with score ${verificationScore}% (good enough)`)
                 break
               } else if (attempt < maxAttempts) {
@@ -241,15 +248,23 @@ export default function App() {
               } else {
                 console.log(`Page ${i + 1}: Max attempts reached, using best extraction (score: ${verificationScore}%)`)
                 pageQuestions = questions
+                pageProcessed = true
               }
             } catch (error) {
               console.error(`Page ${i + 1}, Attempt ${attempt} failed:`, error)
               if (attempt === maxAttempts) {
-                throw error
+                skippedPages.push(i + 1)
+                console.warn(`Page ${i + 1}: SKIPPED - Error after ${maxAttempts} attempts`)
+                break
               }
               feedback = 'Previous attempt failed. Retrying with next API key...'
               await new Promise(resolve => setTimeout(resolve, 2000))
             }
+          }
+
+          if (!pageProcessed && pageQuestions.length === 0 && !skippedPages.includes(i + 1)) {
+            skippedPages.push(i + 1)
+            console.warn(`Page ${i + 1}: SKIPPED - No valid extraction`)
           }
 
           console.log(`Page ${i + 1}: Final result - ${pageQuestions.length} questions extracted`)
@@ -283,6 +298,11 @@ export default function App() {
           )
 
           await new Promise(resolve => setTimeout(resolve, 100))
+        }
+
+        if (skippedPages.length > 0) {
+          console.warn(`PDF PROCESSING COMPLETE: Pages skipped - ${skippedPages.join(', ')}`)
+          alert(`Processing complete!\n\nSkipped pages (no questions found): ${skippedPages.join(', ')}\n\nTotal questions extracted: ${extractedQuestions.length}`)
         }
 
         setPdfFiles(prev =>
