@@ -324,21 +324,30 @@ export default function App() {
   }
 
   const generatePrompt = () => {
-    const enabledTypes = questionTypes.filter(qt => qt.enabled).map(qt => qt.type).join(', ')
+    const enabledTypes = questionTypes.filter(qt => qt.enabled)
+    const typeList = enabledTypes.map(qt => qt.type).join(', ')
+    const typeDescriptions = enabledTypes.map(qt => {
+      switch(qt.type) {
+        case 'MCQ': return 'MCQ: Multiple Choice (single correct answer)'
+        case 'MSQ': return 'MSQ: Multiple Select (multiple correct answers)'
+        case 'NAT': return 'NAT: Numerical Answer Type (numeric value only)'
+        case 'SUB': return 'SUB: Subjective (written/essay answers)'
+        default: return qt.type
+      }
+    }).join('\n')
 
     return `You are an expert at extracting questions from exam papers with PERFECT accuracy. Every detail matters.
 
+CRITICAL: Extract ONLY these specific question types: ${typeList}
+
+${typeDescriptions}
+
 IMPORTANT RULES:
 1. Extract ONLY COMPLETE questions (ignore partial/continued questions)
-2. You MUST use KaTeX for ALL mathematical content, tables, and matrices
-3. You MUST create SVG for ALL visual elements (diagrams, circuits, graphs, etc.)
-4. Extraction must be 100% accurate - students should not notice any difference
-
-Question types to extract: ${enabledTypes}
-- MCQ: Multiple Choice (single correct)
-- MSQ: Multiple Select (multiple correct)
-- NAT: Numerical Answer
-- SUB: Subjective
+2. Extract ONLY the question types listed above - ignore ALL OTHER question types
+3. You MUST use KaTeX for ALL mathematical content, tables, and matrices
+4. You MUST create SVG for ALL visual elements (diagrams, circuits, graphs, etc.)
+5. Extraction must be 100% accurate - students should not notice any difference
 
 FORMATTING REQUIREMENTS:
 
@@ -410,8 +419,11 @@ Empty if no complete questions: []`
       return questionsArray
         .filter((q: any) => q.question_type && q.question_statement)
         .map(q => {
-          const qt = questionTypes.find(t => t.type === q.question_type)
-          if (!qt) return null
+          const qt = questionTypes.find(t => t.type === q.question_type && t.enabled)
+          if (!qt) {
+            console.warn(`Question type "${q.question_type}" not enabled or not recognized, skipping`)
+            return null
+          }
 
           const selectedSlotObj = slots.find(s => s.id === selectedSlot)
           const selectedPartObj = parts.find(p => p.id === selectedPart)
