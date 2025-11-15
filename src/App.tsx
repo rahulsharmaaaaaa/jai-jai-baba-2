@@ -172,99 +172,104 @@ export default function App() {
         )
 
         const skippedPages: number[] = []
+        const retryPages: Array<{index: number, imageData: string}> = []
 
-        for (let i = 0; i < images.length; i++) {
-          const imageData = images[i]
-          const prompt = generatePrompt()
-
-          console.log(`\n=== PROCESSING PAGE ${i + 1} ===`)
+        const processPageWithExtraction = async (imageData: string, pageNum: number, isRetry: boolean = false) => {
+          const prompt = generatePrompt(isRetry)
+          const attemptPhrase = isRetry ? 'RETRY' : 'INITIAL'
+          console.log(`\n=== PROCESSING PAGE ${pageNum} (${attemptPhrase}) ===`)
 
           let expectedQuestionCount = 0
           try {
             expectedQuestionCount = await gemini.countQuestionsInImage(imageData)
-            console.log(`Page ${i + 1}: Expected ${expectedQuestionCount} questions`)
+            console.log(`Page ${pageNum}: Expected ${expectedQuestionCount} questions`)
           } catch (error) {
-            console.error(`Failed to count questions on page ${i + 1}:`, error)
+            console.error(`Failed to count questions on page ${pageNum}:`, error)
           }
 
           let pageQuestions: ExtractedQuestion[] = []
           let verificationScore = 0
           let extractionResponse = ''
           let feedback = ''
-          const maxAttempts = 6
+          const maxAttempts = isRetry ? 8 : 6
           let pageProcessed = false
 
           for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
               if (attempt === 1) {
-                console.log(`Page ${i + 1}, Attempt ${attempt}: Initial extraction...`)
+                console.log(`Page ${pageNum}, Attempt ${attempt}: Initial extraction...`)
                 extractionResponse = await gemini.analyzeImage(imageData, prompt)
               } else {
-                console.log(`Page ${i + 1}, Attempt ${attempt}: Fixing - ${feedback}`)
+                console.log(`Page ${pageNum}, Attempt ${attempt}: Fixing - ${feedback}`)
                 extractionResponse = await gemini.fixExtraction(imageData, extractionResponse, feedback)
               }
 
               const questions = parseGeminiResponse(extractionResponse, pdfFile.year)
-              console.log(`Page ${i + 1}, Attempt ${attempt}: Extracted ${questions.length} questions`)
+              console.log(`Page ${pageNum}, Attempt ${attempt}: Extracted ${questions.length} questions`)
 
               if (questions.length === 0) {
-                console.log(`Page ${i + 1}: No questions extracted, attempt ${attempt}/${maxAttempts}`)
+                console.log(`Page ${pageNum}: No questions extracted, attempt ${attempt}/${maxAttempts}`)
                 if (attempt < maxAttempts) {
-                  feedback = 'No questions extracted. Scan image again and extract ALL complete questions visible on the page.'
+                  feedback = isRetry
+                    ? `CRITICAL RETRY: This page MUST have ${questionTypes.filter(t => t.enabled).map(t => t.type).join(' and/or ')} questions. Extract EVERY question visible. Do not return empty.`
+                    : 'No questions extracted. Scan image again and extract ALL complete questions visible on the page.'
                   await new Promise(resolve => setTimeout(resolve, 1000))
                   continue
                 }
-                skippedPages.push(i + 1)
-                console.warn(`Page ${i + 1}: SKIPPED - No questions found after ${maxAttempts} attempts`)
-                break
+                return { pageQuestions: [], pageProcessed: false, shouldRetry: !isRetry }
               }
 
               const verification = await gemini.verifyExtraction(imageData, extractionResponse)
               verificationScore = verification.score
               feedback = verification.feedback
 
-              console.log(`Page ${i + 1}, Attempt ${attempt}: Verification score ${verificationScore}% - ${feedback}`)
+              console.log(`Page ${pageNum}, Attempt ${attempt}: Verification score ${verificationScore}% - ${feedback}`)
 
               const questionMismatch = expectedQuestionCount > 0 && questions.length < expectedQuestionCount
               if (questionMismatch) {
                 feedback += ` (CRITICAL: Expected ${expectedQuestionCount} questions but only extracted ${questions.length}. Make sure no questions are skipped.)`
                 verificationScore = Math.max(0, verificationScore - 20)
-                console.log(`Page ${i + 1}: Question count mismatch! Expected ${expectedQuestionCount}, got ${questions.length}`)
+                console.log(`Page ${pageNum}: Question count mismatch! Expected ${expectedQuestionCount}, got ${questions.length}`)
               }
 
               if (verificationScore >= 99) {
                 pageQuestions = questions
                 pageProcessed = true
-                console.log(`Page ${i + 1}: APPROVED! Score ${verificationScore}% - All ${questions.length} questions extracted perfectly`)
+                console.log(`Page ${pageNum}: APPROVED! Score ${verificationScore}% - All ${questions.length} questions extracted perfectly`)
                 break
               } else if (verificationScore >= 95 && !questionMismatch) {
                 pageQuestions = questions
                 pageProcessed = true
-                console.log(`Page ${i + 1}: Accepted with score ${verificationScore}% (good enough)`)
+                console.log(`Page ${pageNum}: Accepted with score ${verificationScore}% (good enough)`)
                 break
               } else if (attempt < maxAttempts) {
-                console.log(`Page ${i + 1}: Score too low (${verificationScore}%), retrying...`)
+                console.log(`Page ${pageNum}: Score too low (${verificationScore}%), retrying...`)
                 await new Promise(resolve => setTimeout(resolve, 1500))
               } else {
-                console.log(`Page ${i + 1}: Max attempts reached, using best extraction (score: ${verificationScore}%)`)
+                console.log(`Page ${pageNum}: Max attempts reached, using best extraction (score: ${verificationScore}%)`)
                 pageQuestions = questions
                 pageProcessed = true
               }
             } catch (error) {
-              console.error(`Page ${i + 1}, Attempt ${attempt} failed:`, error)
+              console.error(`Page ${pageNum}, Attempt ${attempt} failed:`, error)
               if (attempt === maxAttempts) {
-                skippedPages.push(i + 1)
-                console.warn(`Page ${i + 1}: SKIPPED - Error after ${maxAttempts} attempts`)
-                break
+                return { pageQuestions: [], pageProcessed: false, shouldRetry: !isRetry }
               }
               feedback = 'Previous attempt failed. Retrying with next API key...'
               await new Promise(resolve => setTimeout(resolve, 2000))
             }
           }
 
-          if (!pageProcessed && pageQuestions.length === 0 && !skippedPages.includes(i + 1)) {
-            skippedPages.push(i + 1)
-            console.warn(`Page ${i + 1}: SKIPPED - No valid extraction`)
+          return { pageQuestions, pageProcessed, shouldRetry: false }
+        }
+
+        for (let i = 0; i < images.length; i++) {
+          const result = await processPageWithExtraction(images[i], i + 1, false)
+          const { pageQuestions, shouldRetry } = result
+
+          if (shouldRetry) {
+            retryPages.push({ index: i, imageData: images[i] })
+            console.warn(`Page ${i + 1}: Will retry after all pages`)
           }
 
           console.log(`Page ${i + 1}: Final result - ${pageQuestions.length} questions extracted`)
@@ -281,14 +286,6 @@ export default function App() {
             }
           }
 
-          if (pageQuestions.length > 0 && expectedQuestionCount > 0) {
-            if (pageQuestions.length === expectedQuestionCount) {
-              console.log(`Page ${i + 1}: COMPLETE VALIDATION PASSED - All ${pageQuestions.length} questions extracted`)
-            } else {
-              console.warn(`Page ${i + 1}: WARNING - Expected ${expectedQuestionCount} questions but extracted ${pageQuestions.length}`)
-            }
-          }
-
           setPdfFiles(prev =>
             prev.map(p =>
               p.id === pdfFile.id
@@ -296,6 +293,33 @@ export default function App() {
                 : p
             )
           )
+
+          await new Promise(resolve => setTimeout(resolve, 100))
+        }
+
+        for (const retryPage of retryPages) {
+          console.log(`\n=== RETRYING PAGE ${retryPage.index + 1} ===`)
+          const result = await processPageWithExtraction(retryPage.imageData, retryPage.index + 1, true)
+          const { pageQuestions } = result
+
+          console.log(`Page ${retryPage.index + 1}: RETRY result - ${pageQuestions.length} questions extracted`)
+
+          for (const question of pageQuestions) {
+            setExtractedQuestions(prev => [...prev, question])
+
+            if (autoSave) {
+              try {
+                await saveQuestionToSupabase(question)
+              } catch (saveError) {
+                console.error('Error auto-saving question:', saveError)
+              }
+            }
+          }
+
+          if (pageQuestions.length === 0) {
+            skippedPages.push(retryPage.index + 1)
+            console.warn(`Page ${retryPage.index + 1}: SKIPPED after retry - No questions found`)
+          }
 
           await new Promise(resolve => setTimeout(resolve, 100))
         }
@@ -323,31 +347,34 @@ export default function App() {
     setIsProcessing(false)
   }
 
-  const generatePrompt = () => {
+  const generatePrompt = (isRetry: boolean = false) => {
     const enabledTypes = questionTypes.filter(qt => qt.enabled)
     const typeList = enabledTypes.map(qt => qt.type).join(', ')
     const typeDescriptions = enabledTypes.map(qt => {
       switch(qt.type) {
-        case 'MCQ': return 'MCQ: Multiple Choice (single correct answer)'
-        case 'MSQ': return 'MSQ: Multiple Select (multiple correct answers)'
-        case 'NAT': return 'NAT: Numerical Answer Type (numeric value only)'
-        case 'SUB': return 'SUB: Subjective (written/essay answers)'
+        case 'MCQ': return 'MCQ: Multiple Choice (single correct answer) - has 4-5 options'
+        case 'MSQ': return 'MSQ: Multiple Select (multiple correct answers) - has 4-5 options with multiple correct'
+        case 'NAT': return 'NAT: Numerical Answer Type - NO options, just a number to fill in'
+        case 'SUB': return 'SUB: Subjective (written/essay answers) - NO options, student writes answer'
         default: return qt.type
       }
     }).join('\n')
 
-    return `You are an expert at extracting questions from exam papers with PERFECT accuracy. Every detail matters.
+    const retryWarning = isRetry ? `\n⚠️  RETRY MODE - THIS IS YOUR SECOND CHANCE:\nThis page previously returned 0 questions but MUST contain ${typeList} questions.\nEXTRACT EVERY SINGLE QUESTION visible. Do NOT return empty array.` : ''
 
-CRITICAL: Extract ONLY these specific question types: ${typeList}
+    return `You are an expert at extracting questions from exam papers with PERFECT accuracy. Every detail matters.${retryWarning}
 
+QUESTION TYPES YOU MUST EXTRACT - ${typeList}:
 ${typeDescriptions}
 
-IMPORTANT RULES:
+CRITICAL RULES:
 1. Extract ONLY COMPLETE questions (ignore partial/continued questions)
-2. Extract ONLY the question types listed above - ignore ALL OTHER question types
-3. You MUST use KaTeX for ALL mathematical content, tables, and matrices
-4. You MUST create SVG for ALL visual elements (diagrams, circuits, graphs, etc.)
-5. Extraction must be 100% accurate - students should not notice any difference
+2. Extract ONLY these types: ${typeList} - ignore ALL OTHER types
+3. You MUST use KaTeX for ALL math, tables, matrices
+4. You MUST create SVG for ALL diagrams, circuits, graphs
+5. For NAT & SUB types: ${enabledTypes.some(t => t.type === 'NAT') ? 'NO OPTIONS - just statement' : ''} ${enabledTypes.some(t => t.type === 'SUB') ? 'NO OPTIONS - just statement' : ''}
+6. For MCQ & MSQ types: ALWAYS include options array
+7. 100% accurate extraction - students should not notice any difference
 
 FORMATTING REQUIREMENTS:
 
